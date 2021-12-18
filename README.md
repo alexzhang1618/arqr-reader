@@ -11,8 +11,8 @@ install Pillow\
 install requests\
 install BeautifulSoup4\
 install html5lib\
-install pyzbar\
+install pyzbar
 
 # React
 install react and npm\
-install axios\
+install axios
