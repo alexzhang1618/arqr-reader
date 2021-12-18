@@ -1,6 +1,6 @@
-## Setup
+# Setup
 
-# Python
+## Python
 install flask\
 install flask-restful\
 install flask-cors\
@@ -13,6 +13,6 @@ install BeautifulSoup4\
 install html5lib\
 install pyzbar
 
-# React
+## React
 install react and npm\
 install axios
