@@ -2,13 +2,15 @@ from flask import Response, Flask
 from flask.helpers import send_from_directory
 from flask_restful import Api, Resource, reqparse
 from flask_cors import CORS
-from src.main import processImage, format_data
+from src.main import ImageProcessor, format_data
 import cv2
 import threading
+import time
 
 frame = None
 lock = threading.Lock()
 data = None
+ip = ImageProcessor()
 AR = False
 
 class VideoApiHandler(Resource):
@@ -47,9 +49,10 @@ def detect_codes():
         isRead, frame = vc.read()
         if not isRead:
             break
-        processed, codeExists, data = processImage(frame, AR)
+        processed, codeExists, data = ip.processImage(frame, AR)
         with lock:
             frame = processed.copy()
+        time.sleep(0.1)
 
 def encode_frame():
     global frame, lock

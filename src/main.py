@@ -188,35 +188,6 @@ def makeARPreviewFrame(frame, pts, path, imgWidth, imgHeight):
     returnFrame = returnFrame.astype("uint8")
     return returnFrame
 
-# Processes a single frame and returns the new frame with 
-# a display if a QR code is detected
-# @param frame The image frame to be processed
-# @param AR A boolean storing if an AR preview should be added
-# @return The processed frame, a boolean storing if a code 
-# is found, and the data from the code
-def processImage(frame, AR=False):
-    codes = pyzbar.decode(frame)
-    
-    # Codes have been detected
-    if len(codes) > 0:
-        for code in codes:
-            points = code.polygon
-            data = code.data.decode("utf-8")
-            codeType = code.type
-        
-            # Preparing text to be displayed. (Text shows type of code and the data associated with it)
-            text = "{0}: {1}".format(codeType, data)
-            # If the data needs to be showed in the AR preview, update the frame to include the preview.
-            # Performance is slower when AR previews need to be shown.
-            if AR:
-                imgWidth, imgHeight = frame.shape[1], frame.shape[2]
-                frame = makeARPreviewFrame(frame, points, makePreview(data), imgWidth, imgHeight)
-                displayBox(frame, points)
-            else:
-                displayBox(frame, points, text)
-        return frame, True, data
-    return frame, False, None
-
 # Formats data into a valid url
 # @param data A string containing data from a QR code
 # @return Valid URL containing the data
@@ -224,6 +195,103 @@ def format_data(data):
     if not data or not validators.url(data):
         return "https://www.google.com/search?q={}".format(data)
     return data
+
+class ImageProcessor():
+    def __init__(self):
+        # Boolean value storing if a code has been detected recently.
+        self.qrExists = False
+        # Time object denoting the last time a code has been detected.
+        self.lastSeen = None
+        # List storing previously found points for codes, used in the optical flow algorithm.
+        self.prevPoints = []
+        # Object storing the last frame when a code was detected.
+        self.prevImage = None
+        # List storing the formatted text values of previously detected codes for display purposes.
+        self.prevText, self.prevData = [], []
+        # Set storing data values that augmented reality previews will be generated for.
+        self.showPreview = set()
+        
+    # Processes a single frame and returns the new frame with 
+    # a display if a QR code is detected
+    # @param frame The image frame to be processed
+    # @param AR A boolean storing if an AR preview should be added
+    # @return The processed frame, a boolean storing if a code 
+    # is found, and the data from the code
+    def processImage(self, frame, AR=False):
+        codes = pyzbar.decode(frame)
+        if len(codes) == 0 and self.qrExists:
+            # A code has been detected previously but is not found currently on this frame.
+            # Optical flow will be used with the previously found points to draw detection boxes.
+            for j in range(len(self.prevPoints)):
+                point = self.prevPoints[j]
+                # Argument types are changed to fit the optical flow algorithm parameters.
+                p1 = [[[np.float32(i[0]), np.float32(i[1])]] for i in point]
+                p = np.array(p1)
+                f = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                pI = cv2.cvtColor(self.prevImage, cv2.COLOR_BGR2GRAY)
+                
+                newPoints, status, error = cv2.calcOpticalFlowPyrLK(pI, f, p, None, **optFlowParams)
+                
+                # Change the types of the points to fit the arguments of displayBox()
+                newPoints = [[int(i[0][0]), int(i[0][1])] for i in newPoints]
+                
+                # Computing the distance between center of old points and center of new points.
+                newCenter = np.array(findCenter(newPoints))
+                oldCenter = np.array(findCenter(self.prevPoints[j]))
+                dist = np.linalg.norm(newCenter - oldCenter)
+                
+                noSuddenMovement = dist < 150
+                    
+                # Only display the box if there's no sudden change in placement and the shape is correct.
+                if isRectangle(newPoints) and noSuddenMovement:
+                    if AR and self.prevData[j] in self.showPreview:
+                        imgWidth, imgHeight = frame.shape[1], frame.shape[2]
+                        frame = makeARPreviewFrame(frame, self.prevPoints[j], makePreview(self.prevData[j]), imgWidth, imgHeight)
+                        displayBox(frame, newPoints)
+                        return frame, True, self.prevData[j]
+                    else:
+                        displayBox(frame, newPoints, self.prevText[j])
+                        return frame, True, self.prevData[j]
+                    
+                # Optical flow times out after one full second of no code detection.
+                # QR code may no longer be in frame, time out and reset everything.
+                elif time.time() - self.lastSeen > 1:
+                    self.qrExists = False
+                    self.lastSeen = None
+                    self.prevPoints.clear()
+                    self.prevText.clear()
+                    self.prevData.clear()
+                    self.prevImage = None
+        
+        # Codes have been detected, all "prev" variables can be updated.
+        elif len(codes) > 0:
+            self.qrExists = True
+            self.lastSeen = time.time()
+            self.prevPoints.clear()
+            self.prevText.clear()
+            self.prevData.clear()
+            self.prevImage = frame
+        
+            for code in codes:
+                points = code.polygon
+                self.prevPoints.append(points)
+                data = code.data.decode("utf-8")
+                codeType = code.type
+            
+                # Preparing text to be displayed. (Text shows type of code and the data associated with it)
+                text = "{0}: {1}".format(codeType, data)
+                self.prevText.append(text)
+                self.prevData.append(data)
+                # If the data needs to be showed in the AR preview, update the frame to include the preview.
+                # Performance is slower when AR previews need to be shown.
+                if AR and data in self.showPreview:
+                    imgWidth, imgHeight = frame.shape[1], frame.shape[2]
+                    frame = makeARPreviewFrame(frame, points, makePreview(data), imgWidth, imgHeight)
+                    displayBox(frame, points)
+                else:
+                    displayBox(frame, points, text)
+            return frame, True, self.prevData[0]
+        return frame, False, None
 
 # Main loop for the ARQR application
 def main():
